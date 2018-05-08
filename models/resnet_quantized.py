@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torchvision.transforms as transforms
 import math
-from .modules.quantize import quantize, quantize_grad, QConv2d, QLinear
+from .modules.quantize import quantize, quantize_grad, QConv2d, QLinear, RangeBN
 __all__ = ['resnet_quantized']
 
 NUM_BITS = 8
@@ -20,7 +20,7 @@ def init_model(model):
         if isinstance(m, QConv2d):
             n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
             m.weight.data.normal_(0, math.sqrt(2. / n))
-        elif isinstance(m, nn.BatchNorm2d):
+        elif isinstance(m, RangeBN):
             m.weight.data.fill_(1)
             m.bias.data.zero_()
 
@@ -31,10 +31,10 @@ class BasicBlock(nn.Module):
     def __init__(self, inplanes, planes, stride=1, downsample=None):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes)
+        self.bn1 = RangeBN(planes)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes)
+        self.bn2 = RangeBN(planes)
         self.downsample = downsample
         self.stride = stride
 
@@ -64,14 +64,14 @@ class Bottleneck(nn.Module):
         super(Bottleneck, self).__init__()
         self.conv1 = QConv2d(inplanes, planes, kernel_size=1, bias=False,
                              num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
-        self.bn1 = nn.BatchNorm2d(planes)
+        self.bn1 = RangeBN(planes)
         self.conv2 = QConv2d(planes, planes, kernel_size=3, stride=stride,
                              padding=1, bias=False, num_bits=NUM_BITS,
                              num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
-        self.bn2 = nn.BatchNorm2d(planes)
+        self.bn2 = RangeBN(planes)
         self.conv3 = QConv2d(planes, planes * 4, kernel_size=1, bias=False,
                              num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
-        self.bn3 = nn.BatchNorm2d(planes * 4)
+        self.bn3 = RangeBN(planes * 4)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -111,7 +111,7 @@ class ResNet(nn.Module):
                 QConv2d(self.inplanes, planes * block.expansion,
                         kernel_size=1, stride=stride, bias=False,
                         num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD),
-                nn.BatchNorm2d(planes * block.expansion),
+                RangeBN(planes * block.expansion),
             )
 
         layers = []
@@ -148,7 +148,7 @@ class ResNet_imagenet(ResNet):
         self.inplanes = 64
         self.conv1 = QConv2d(3, 64, kernel_size=7, stride=2, padding=3,
                              bias=False, num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.bn1 = RangeBN(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
@@ -156,7 +156,8 @@ class ResNet_imagenet(ResNet):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.avgpool = nn.AvgPool2d(7)
-        self.fc = QLinear(512 * block.expansion, num_classes, num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
+        self.fc = QLinear(512 * block.expansion, num_classes, num_bits=NUM_BITS,
+                          num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
 
         init_model(self)
         self.regime = [
@@ -177,7 +178,7 @@ class ResNet_cifar10(ResNet):
         n = int((depth - 2) / 6)
         self.conv1 = QConv2d(3, 16, kernel_size=3, stride=1, padding=1,
                              bias=False, num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
-        self.bn1 = nn.BatchNorm2d(16)
+        self.bn1 = RangeBN(16)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = lambda x: x
         self.layer1 = self._make_layer(block, 16, n)
@@ -185,7 +186,8 @@ class ResNet_cifar10(ResNet):
         self.layer3 = self._make_layer(block, 64, n, stride=2)
         self.layer4 = lambda x: x
         self.avgpool = nn.AvgPool2d(8)
-        self.fc = QLinear(64, num_classes, num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
+        self.fc = QLinear(64, num_classes, num_bits=NUM_BITS,
+                          num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD)
 
         init_model(self)
         self.regime = [
