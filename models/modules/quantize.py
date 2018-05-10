@@ -22,7 +22,8 @@ def _mean(p, dim):
 class UniformQuantize(InplaceFunction):
 
     @classmethod
-    def forward(cls, ctx, input, num_bits=8, min_value=None, max_value=None, stochastic=False, inplace=False):
+    def forward(cls, ctx, input, num_bits=8, min_value=None, max_value=None,
+                stochastic=False, inplace=False, enforce_true_zero=False):
         if min_value is None:
             min_value = float(input.view(input.size(0), -1).min(-1)[0].mean())
         if max_value is None:
@@ -43,35 +44,40 @@ class UniformQuantize(InplaceFunction):
         qmax = 2.**num_bits - 1.
 
         scale = (max_value - min_value) / (qmax - qmin)
-        if scale == 0:  # choose arbitrary scale
-            scale = 1
 
-        initial_zero_point = qmin - min_value / scale
+        scale = max(scale, 1e-8)
 
-        zero_point = 0.
-        # make zero exactly represented
-        if initial_zero_point < qmin:
-            zero_point = qmin
-        elif initial_zero_point > qmax:
-            zero_point = qmax
+        if enforce_true_zero:
+            initial_zero_point = qmin - min_value / scale
+            zero_point = 0.
+            # make zero exactly represented
+            if initial_zero_point < qmin:
+                zero_point = qmin
+            elif initial_zero_point > qmax:
+                zero_point = qmax
+            else:
+                zero_point = initial_zero_point
+            zero_point = int(zero_point)
+            output.div_(scale).add_(zero_point)
         else:
-            zero_point = initial_zero_point
+            output.add_(-min_value).div_(scale).add_(qmin)
 
-        zero_point = int(zero_point)
-        output.div_(scale).add_(zero_point)
         if ctx.stochastic:
             noise = output.new(output.shape).uniform_(-0.5, 0.5)
             output.add_(noise)
 
         output.clamp_(qmin, qmax).round_()  # quantize
-        output.add_(-zero_point).mul_(scale)  # dequantize
+        if enforce_true_zero:
+            output.add_(-zero_point).mul_(scale) # dequantize
+        else:
+            output.add_(-qmin).mul_(scale).add_(min_value)  # dequantize
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         # straight-through estimator
         grad_input = grad_output
-        return grad_input, None, None, None, None, None
+        return grad_input, None, None, None, None, None, None
 
 
 class UniformQuantizeGrad(InplaceFunction):
@@ -234,7 +240,7 @@ class QLinear(nn.Linear):
 class RangeBN(nn.Module):
     # this is normalized RangeBN
 
-    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_chunks=8, eps=1e-8, num_bits=8, num_bits_grad=8):
+    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_chunks=16, eps=1e-5, num_bits=8, num_bits_grad=8):
         super(RangeBN, self).__init__()
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.zeros(num_features))
@@ -264,10 +270,10 @@ class RangeBN(nn.Module):
 
             scale = 1 / ((mean_max - mean_min) * self.const + self.eps)
 
-            self.running_mean.mul_(self.momentum).add_(
+            self.running_mean.detach().mul_(self.momentum).add_(
                 mean * (1 - self.momentum))
 
-            self.running_var.mul_(self.momentum).add_(
+            self.running_var.detach().mul_(self.momentum).add_(
                 scale * (1 - self.momentum))
         else:
             mean = self.running_mean
