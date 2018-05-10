@@ -6,7 +6,7 @@ __all__ = ['resnet_quantized']
 
 NUM_BITS = 8
 NUM_BITS_WEIGHT = 8
-NUM_BITS_GRAD = None
+NUM_BITS_GRAD = 8
 
 
 def conv3x3(in_planes, out_planes, stride=1):
