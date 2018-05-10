@@ -234,45 +234,35 @@ class QLinear(nn.Linear):
 class RangeBN(nn.Module):
     # this is normalized RangeBN
 
-    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_bits=8, num_bits_grad=8):
+    def __init__(self, num_features, dim=1, momentum=0.1, affine=True, num_chunks=8, eps=1e-8, num_bits=8, num_bits_grad=8):
         super(RangeBN, self).__init__()
         self.register_buffer('running_mean', torch.zeros(num_features))
         self.register_buffer('running_var', torch.zeros(num_features))
 
         self.momentum = momentum
         self.dim = dim
-        self.bias = nn.Parameter(torch.Tensor(num_features))
-        self.weight = nn.Parameter(torch.Tensor(num_features))
+        if affine:
+            self.bias = nn.Parameter(torch.Tensor(num_features))
+            self.weight = nn.Parameter(torch.Tensor(num_features))
         self.num_bits = num_bits
         self.num_bits_grad = num_bits_grad
         self.quantize_input = QuantMeasure(self.num_bits)
+        self.eps = eps
+        self.num_chunks = num_chunks
+        self.const = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
+                                     0.5) / ((2 * math.log(self.num_chunks)) ** 0.5)
 
     def forward(self, x):
-        # p=5
-        K = 1
-        NumOfChunks = 8
-        C = 0
         x = self.quantize_input(x)
         if self.training:
-            # B = x.view(x.size(0), NumOfChunks, x.size(1) // NumOfChunks, -1)
-            mean = x.view(x.size(0), x.size(
-                self.dim), -1).mean(-1).mean(0)  # C
-            y = x.transpose(0, 1)  # CxBxHxW
-            z = y.contiguous()
-            t = z.view(z.size(0), -1)  # Cx(B*H*W)
-            A = t.transpose(1, 0) - mean
+            B, C, H, W = x.shape
+            y = x.transpose(0, 1).contiguous()  # C x B x H x W
+            y = y.view(C, self.num_chunks, B * H * W // self.num_chunks)
+            mean_max = y.max(-1)[0].mean(-1)  # C
+            mean_min = y.min(-1)[0].mean(-1)  # C
+            mean = y.view(C, -1).mean(-1)  # C
 
-            B = torch.chunk(A, NumOfChunks, dim=0)
-
-            for i in range(0, NumOfChunks):
-                const = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
-                                        0.5) / ((2 * math.log(B[i].size(0))) ** 0.5)
-                C = C + (torch.max(B[i], dim=0)[0] -
-                         torch.min(B[i], dim=0)[0]) * const
-
-            MeanTOPK = C / NumOfChunks
-
-            scale = 1 / (MeanTOPK + 0.0000001)
+            scale = 1 / ((mean_max - mean_min) * self.const + self.eps)
 
             self.running_mean.mul_(self.momentum).add_(
                 mean * (1 - self.momentum))
