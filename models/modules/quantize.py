@@ -23,11 +23,18 @@ class UniformQuantize(InplaceFunction):
 
     @classmethod
     def forward(cls, ctx, input, num_bits=8, min_value=None, max_value=None,
-                stochastic=False, inplace=False, enforce_true_zero=False):
+                stochastic=False, inplace=False, enforce_true_zero=False , num_chunks=None):
+
+        num_chunks = num_chunks=input.shape[0] if num_chunks is None else num_chunks
+        if min_value is None or max_value is None:
+            B = input.shape[0]
+            y = input.view(B//num_chunks,-1)
         if min_value is None:
-            min_value = float(input.view(input.size(0), -1).min(-1)[0].mean())
+            min_value = y.min(-1)[0].mean(-1)  # C
+            #min_value = float(input.view(input.size(0), -1).min(-1)[0].mean())
         if max_value is None:
-            max_value = float(input.view(input.size(0), -1).max(-1)[0].mean())
+            #max_value = float(input.view(input.size(0), -1).max(-1)[0].mean())
+            max_value = y.max(-1)[0].mean(-1)  # C
         ctx.inplace = inplace
         ctx.num_bits = num_bits
         ctx.min_value = min_value
@@ -42,7 +49,7 @@ class UniformQuantize(InplaceFunction):
 
         qmin = 0.
         qmax = 2.**num_bits - 1.
-
+        #import pdb; pdb.set_trace()
         scale = (max_value - min_value) / (qmax - qmin)
 
         scale = max(scale, 1e-8)
@@ -145,8 +152,8 @@ def conv2d_biprec(input, weight, bias=None, stride=1, padding=0, dilation=1, gro
     return Conv2d_BiPrec().apply(input, weight, bias, stride, padding, dilation, groups, num_bits_grad)
 
 
-def quantize(x, num_bits=8, min_value=None, max_value=None, stochastic=False, inplace=False):
-    return UniformQuantize().apply(x, num_bits, min_value, max_value, stochastic, inplace)
+def quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, stochastic=False, inplace=False):
+    return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks,stochastic, inplace)
 
 
 def quantize_grad(x, num_bits=8, min_value=None, max_value=None, stochastic=True, inplace=False):
@@ -176,7 +183,7 @@ class QuantMeasure(nn.Module):
         else:
             min_value = self.running_min
             max_value = self.running_max
-        return quantize(input, self.num_bits, min_value=float(min_value), max_value=float(max_value))
+        return quantize(input, self.num_bits, min_value=float(min_value), max_value=float(max_value),num_chunks=16)
 
 
 class QConv2d(nn.Conv2d):
@@ -280,7 +287,7 @@ class RangeBN(nn.Module):
         else:
             mean = self.running_mean
             scale = self.running_var
-
+        scale = quantize(scale, num_bits=self.num_bits,min_value=float(scale.min()),max_value=float(scale.max()))
         out = (x - mean.view(1, mean.size(0), 1, 1)) * \
             scale.view(1, scale.size(0), 1, 1)
 
