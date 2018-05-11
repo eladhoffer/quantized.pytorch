@@ -94,13 +94,15 @@ class UniformQuantizeGrad(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.min_value is None:
-            min_value = float(grad_output.view(
-                grad_output.size(0), -1).min(-1)[0].mean())
+            min_value = float(grad_output.min())
+            # min_value = float(grad_output.view(
+                # grad_output.size(0), -1).min(-1)[0].mean())
         else:
             min_value = ctx.min_value
         if ctx.max_value is None:
-            max_value = float(grad_output.view(
-                grad_output.size(0), -1).max(-1)[0].mean())
+            max_value = float(grad_output.max())
+            # max_value = float(grad_output.view(
+                # grad_output.size(0), -1).max(-1)[0].mean())
         else:
             max_value = ctx.max_value
         grad_input = UniformQuantize().apply(grad_output, ctx.num_bits,
