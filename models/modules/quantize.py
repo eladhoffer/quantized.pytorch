@@ -23,12 +23,13 @@ class UniformQuantize(InplaceFunction):
 
     @classmethod
     def forward(cls, ctx, input, num_bits=8, min_value=None, max_value=None,
-                stochastic=False, inplace=False, enforce_true_zero=False , num_chunks=None):
+                stochastic=False, inplace=False, enforce_true_zero=False, num_chunks=None):
 
-        num_chunks = num_chunks=input.shape[0] if num_chunks is None else num_chunks
+        num_chunks = num_chunks = input.shape[
+            0] if num_chunks is None else num_chunks
         if min_value is None or max_value is None:
             B = input.shape[0]
-            y = input.view(B//num_chunks,-1)
+            y = input.view(B // num_chunks, -1)
         if min_value is None:
             min_value = y.min(-1)[0].mean(-1)  # C
             #min_value = float(input.view(input.size(0), -1).min(-1)[0].mean())
@@ -75,7 +76,7 @@ class UniformQuantize(InplaceFunction):
 
         output.clamp_(qmin, qmax).round_()  # quantize
         if enforce_true_zero:
-            output.add_(-zero_point).mul_(scale) # dequantize
+            output.add_(-zero_point).mul_(scale)  # dequantize
         else:
             output.add_(-qmin).mul_(scale).add_(min_value)  # dequantize
         return output
@@ -103,13 +104,13 @@ class UniformQuantizeGrad(InplaceFunction):
         if ctx.min_value is None:
             min_value = float(grad_output.min())
             # min_value = float(grad_output.view(
-                # grad_output.size(0), -1).min(-1)[0].mean())
+            # grad_output.size(0), -1).min(-1)[0].mean())
         else:
             min_value = ctx.min_value
         if ctx.max_value is None:
             max_value = float(grad_output.max())
             # max_value = float(grad_output.view(
-                # grad_output.size(0), -1).max(-1)[0].mean())
+            # grad_output.size(0), -1).max(-1)[0].mean())
         else:
             max_value = ctx.max_value
         grad_input = UniformQuantize().apply(grad_output, ctx.num_bits,
@@ -117,43 +118,25 @@ class UniformQuantizeGrad(InplaceFunction):
         return grad_input, None, None, None, None, None
 
 
-class Conv2d_BiPrec(Function):
-
-    @classmethod
-    def forward(cls, ctx, input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, num_bits_grad=None):
-        ctx.num_bits_grad = num_bits_grad
-        ctx.stride = stride
-        ctx.padding = padding
-        ctx.dilation = dilation
-        ctx.groups = groups
-        ctx.save_for_backward(input.detach(), weight.detach(), bias)
-        return F.conv2d(input, weight, bias, stride, padding, dilation, groups)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        input, weight, bias = ctx.saved_tensors
-        grad_output.detach_()
-        q_grad_output = grad_output
-        if ctx.num_bits_grad is not None:
-            q_grad_output = quantize(grad_output, num_bits=ctx.num_bits_grad)
-
-        grad_input = F.grad.conv2d_input(
-            input.shape, weight, q_grad_output, ctx.stride, ctx.padding, ctx.dilation, ctx.groups, bias)
-        grad_weight = F.grad.conv2d_weight(
-            input, weight.shape, grad_output, ctx.stride, ctx.padding, ctx.dilation, ctx.groups, bias)
-        if bias is None:
-            grad_bias = None
-        else:
-            grad_bias = _mean(grad_output, 1).view(-1)
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None
-
-
 def conv2d_biprec(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, num_bits_grad=None):
-    return Conv2d_BiPrec().apply(input, weight, bias, stride, padding, dilation, groups, num_bits_grad)
+    out1 = F.conv2d(input.detach(), weight, bias,
+                    stride, padding, dilation, groups)
+    out2 = F.conv2d(input, weight.detach(), bias.detach() if bias is not None else None,
+                    stride, padding, dilation, groups)
+    out2 = quantize_grad(out2, num_bits=num_bits_grad)
+    return out1 + out2 - out1.detach()
+
+
+def linear_biprec(input, weight, bias=None, num_bits_grad=None):
+    out1 = F.linear(input.detach(), weight, bias)
+    out2 = F.linear(input, weight.detach(), bias.detach()
+                    if bias is not None else None)
+    out2 = quantize_grad(out2, num_bits=num_bits_grad)
+    return out1 + out2 - out1.detach()
 
 
 def quantize(x, num_bits=8, min_value=None, max_value=None, num_chunks=None, stochastic=False, inplace=False):
-    return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks,stochastic, inplace)
+    return UniformQuantize().apply(x, num_bits, min_value, max_value, num_chunks, stochastic, inplace)
 
 
 def quantize_grad(x, num_bits=8, min_value=None, max_value=None, stochastic=True, inplace=False):
@@ -183,7 +166,7 @@ class QuantMeasure(nn.Module):
         else:
             min_value = self.running_min
             max_value = self.running_max
-        return quantize(input, self.num_bits, min_value=float(min_value), max_value=float(max_value),num_chunks=16)
+        return quantize(input, self.num_bits, min_value=float(min_value), max_value=float(max_value), num_chunks=16)
 
 
 class QConv2d(nn.Conv2d):
@@ -223,11 +206,12 @@ class QConv2d(nn.Conv2d):
 class QLinear(nn.Linear):
     """docstring for QConv2d."""
 
-    def __init__(self, in_features, out_features, bias=True, num_bits=8, num_bits_weight=None, num_bits_grad=None):
+    def __init__(self, in_features, out_features, bias=True, num_bits=8, num_bits_weight=None, num_bits_grad=None, biprecision=False):
         super(QLinear, self).__init__(in_features, out_features, bias)
         self.num_bits = num_bits
         self.num_bits_weight = num_bits_weight or num_bits
         self.num_bits_grad = num_bits_grad
+        self.biprecision = biprecision
         self.quantize_input = QuantMeasure(self.num_bits)
 
     def forward(self, input):
@@ -240,9 +224,12 @@ class QLinear(nn.Linear):
         else:
             qbias = None
 
-        output = F.linear(qinput, qweight, qbias)
-        if self.num_bits_grad is not None:
-            output = quantize_grad(output, num_bits=self.num_bits_grad)
+        if not self.biprecision or self.num_bits_grad is None:
+            output = F.linear(qinput, qweight, qbias)
+            if self.num_bits_grad is not None:
+                output = quantize_grad(output, num_bits=self.num_bits_grad)
+        else:
+            output = linear_biprec(qinput, qweight, qbias, self.num_bits_grad)
         return output
 
 
@@ -287,7 +274,8 @@ class RangeBN(nn.Module):
         else:
             mean = self.running_mean
             scale = self.running_var
-        scale = quantize(scale, num_bits=self.num_bits,min_value=float(scale.min()),max_value=float(scale.max()))
+        scale = quantize(scale, num_bits=self.num_bits, min_value=float(
+            scale.min()), max_value=float(scale.max()))
         out = (x - mean.view(1, mean.size(0), 1, 1)) * \
             scale.view(1, scale.size(0), 1, 1)
 
