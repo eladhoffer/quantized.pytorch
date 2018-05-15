@@ -23,7 +23,7 @@ class UniformQuantize(InplaceFunction):
 
     @classmethod
     def forward(cls, ctx, input, num_bits=8, min_value=None, max_value=None,
-                stochastic=False, inplace=False, enforce_true_zero=False, num_chunks=None):
+                stochastic=False, inplace=False, enforce_true_zero=False, num_chunks=None, out_half=False):
 
         num_chunks = num_chunks = input.shape[
             0] if num_chunks is None else num_chunks
@@ -73,12 +73,14 @@ class UniformQuantize(InplaceFunction):
         if ctx.stochastic:
             noise = output.new(output.shape).uniform_(-0.5, 0.5)
             output.add_(noise)
-
         output.clamp_(qmin, qmax).round_()  # quantize
+
         if enforce_true_zero:
             output.add_(-zero_point).mul_(scale)  # dequantize
         else:
             output.add_(-qmin).mul_(scale).add_(min_value)  # dequantize
+        if out_half and num_bits <= 16:
+            output = output.half()
         return output
 
     @staticmethod
