@@ -21,15 +21,6 @@ def init_model(model):
             nn.init.kaiming_normal_(
                 m.weight, mode='fan_out', nonlinearity='relu')
 
-        # Zero-initialize the last BN in each block.
-        # This improves the model by 0.2~0.3% according to
-        # https://arxiv.org/abs/1706.02677
-        if isinstance(m, Bottleneck):
-            nn.init.constant_(m.residual_weight, 0)
-            # nn.init.constant_(m.bn3.weight, 0)
-        # elif isinstance(m, BasicBlock):
-            # nn.init.constant_(m.bn2.weight, 0)
-
     # if model.fc.weight.size(0) == 1000:
     nn.init.normal_(model.fc.weight, std=0.01)
 
@@ -72,7 +63,6 @@ class Bottleneck(nn.Module):
                                padding=1, bias=True))
         self.conv3 = wn(nn.Conv2d(planes, planes * 4, kernel_size=1, bias=True))
         self.relu = BiReLU(inplace=True)
-        self.residual_weight = nn.Parameter(torch.Tensor([1.]))
         self.downsample = downsample
         self.stride = stride
 
@@ -85,7 +75,7 @@ class Bottleneck(nn.Module):
         out = self.conv2(out)
         out = self.relu(out)
 
-        out = self.conv3(out) * self.residual_weight
+        out = self.conv3(out)
 
         if self.downsample is not None:
             residual = self.downsample(x)
