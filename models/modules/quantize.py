@@ -255,6 +255,13 @@ class RangeBN(nn.Module):
         self.num_chunks = num_chunks
         self.const = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
                                      0.5) / ((2 * math.log(self.num_chunks)) ** 0.5)
+        self.reset_params()
+
+    def reset_params(self):
+        if self.weight is not None:
+            self.weight.data.uniform_()
+        if self.bias is not None:
+            self.bias.data.zero_()
 
     def forward(self, x):
         x = self.quantize_input(x)
