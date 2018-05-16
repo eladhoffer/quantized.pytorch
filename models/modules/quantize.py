@@ -258,6 +258,9 @@ class RangeBN(nn.Module):
 
     def forward(self, x):
         x = self.quantize_input(x)
+        if x.dim() == 2:  # 1d
+            x = x.unsqueeze(-1,).unsqueeze(-1)
+
         if self.training:
             B, C, H, W = x.shape
             y = x.transpose(0, 1).contiguous()  # C x B x H x W
@@ -292,4 +295,7 @@ class RangeBN(nn.Module):
             out = out + qbias.view(1, qbias.size(0), 1, 1)
         if self.num_bits_grad is not None:
             out = quantize_grad(out, num_bits=self.num_bits_grad)
+
+        if out.size(3) == 1 and out.size(2) == 1:
+            out = out.squeeze(-1).squeeze(-1)
         return out
