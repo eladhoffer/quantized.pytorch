@@ -1,12 +1,12 @@
-# Convolutional networks using PyTorch
+# Quantized Convolutional networks using PyTorch
 
-This is a complete training example for Deep Convolutional Networks on various datasets (ImageNet, Cifar10, Cifar100, MNIST).
+Code to replicate results in [Scalable Methods for 8-bit Training of Neural Networks](https://arxiv.org/abs/1805.11046)
 
-It is based off [imagenet example in pytorch](https://github.com/pytorch/examples/tree/master/imagenet) with some helpful additions such as:
-  - Training on several datasets other than imagenet
-  - Complete logging of trained experiment
-  - Graph visualization of the training/validation loss and accuracy
-  - Definition of preprocessing and optimization regime for each model
+e.g: running an 8-bit quantized resnet18 from the paper on ImageNet
+
+```
+python main.py --model resnet_quantized --model_config "{'depth': 18}" --save quantized_resnet18 --dataset imagenet --b 128
+```
 
 ## Dependencies
 
