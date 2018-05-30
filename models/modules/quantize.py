@@ -253,15 +253,6 @@ class RangeBN(nn.Module):
         self.quantize_input = QuantMeasure(self.num_bits)
         self.eps = eps
         self.num_chunks = num_chunks
-        self.const = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
-                                     0.5) / ((2 * math.log(self.num_chunks)) ** 0.5)
-        self.reset_params()
-
-    def reset_params(self):
-        if self.weight is not None:
-            self.weight.data.uniform_()
-        if self.bias is not None:
-            self.bias.data.zero_()
 
     def forward(self, x):
         x = self.quantize_input(x)
@@ -275,8 +266,10 @@ class RangeBN(nn.Module):
             mean_max = y.max(-1)[0].mean(-1)  # C
             mean_min = y.min(-1)[0].mean(-1)  # C
             mean = y.view(C, -1).mean(-1)  # C
+            scale_fix = (0.5 * 0.35) * (1 + (math.pi * math.log(4)) **
+                                        0.5) / ((2 * math.log(y.size(-1))) ** 0.5)
 
-            scale = 1 / ((mean_max - mean_min) * self.const + self.eps)
+            scale = 1 / ((mean_max - mean_min) * scale_fix + self.eps)
 
             self.running_mean.detach().mul_(self.momentum).add_(
                 mean * (1 - self.momentum))
