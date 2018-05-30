@@ -253,6 +253,13 @@ class RangeBN(nn.Module):
         self.quantize_input = QuantMeasure(self.num_bits)
         self.eps = eps
         self.num_chunks = num_chunks
+        self.reset_params()
+
+    def reset_params(self):
+        if self.weight is not None:
+            self.weight.data.uniform_()
+        if self.bias is not None:
+            self.bias.data.zero_()
 
     def forward(self, x):
         x = self.quantize_input(x)
