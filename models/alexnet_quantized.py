@@ -58,7 +58,8 @@ class AlexNetOWT_BN(nn.Module):
             {'epoch': 0, 'optimizer': 'SGD', 'lr': 1e-2,
              'weight_decay': 5e-4, 'momentum': 0.9},
             {'epoch': 30, 'lr': 1e-3},
-            {'epoch': 60, 'lr': 1e-4}
+            {'epoch': 60, 'lr': 1e-4},
+            {'epoch': 90, 'lr': 5e-4}]
         ]
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
