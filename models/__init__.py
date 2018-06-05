@@ -1,6 +1,3 @@
-
-from .alexnet import *
-from .alexnet_quantized import *
 from .resnet import *
 from .resnet_bwn import *
 from .resnet_quantized import *
