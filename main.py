@@ -176,7 +176,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_data,
         batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True, drop_last=True)
+        num_workers=args.workers, pin_memory=True)
 
     optimizer = OptimRegime(model.parameters(), regime)
     logging.info('training regime: %s', regime)
@@ -228,9 +228,10 @@ def main():
 
 
 def forward(data_loader, model, criterion, epoch=0, training=True, optimizer=None):
+    regularizer = getattr(model, 'regularization', None)
     if args.device_ids and len(args.device_ids) > 1:
         model = torch.nn.DataParallel(model, args.device_ids)
-
+        
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -247,6 +248,9 @@ def forward(data_loader, model, criterion, epoch=0, training=True, optimizer=Non
         # compute output
         output = model(inputs)
         loss = criterion(output, target)
+        if regularizer is not None:
+            loss += regularizer(model)
+
         if type(output) is list:
             output = output[0]
 
