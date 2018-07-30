@@ -13,6 +13,7 @@ NUM_BITS_WEIGHT = 8
 NUM_BITS_GRAD = 8
 BIPRECISION = True
 
+
 def nearby_int(n):
     return int(round(n))
 
@@ -25,6 +26,8 @@ def init_model(model):
         elif isinstance(m, RangeBN):
             m.weight.data.fill_(1)
             m.bias.data.zero_()
+    model.fc.weight.data.normal_(0, 0.01)
+    model.fc.bias.data.zero_()
 
 
 class DepthwiseSeparableFusedConv2d(nn.Module):
@@ -34,12 +37,15 @@ class DepthwiseSeparableFusedConv2d(nn.Module):
         super(DepthwiseSeparableFusedConv2d, self).__init__()
         self.components = nn.Sequential(
             QConv2d(in_channels, in_channels, kernel_size,
-                      stride=stride, padding=padding, groups=in_channels),
-            RangeBN(in_channels),
+                    stride=stride, padding=padding, groups=in_channels, num_bits=NUM_BITS, num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD, biprecision=BIPRECISION),
+            RangeBN(in_channels, num_bits=NUM_BITS,
+                    num_bits_grad=NUM_BITS_GRAD),
             nn.ReLU(),
 
-            QConv2d(in_channels, out_channels, 1, bias=False),
-            RangeBN(out_channels),
+            QConv2d(in_channels, out_channels, 1, bias=False, num_bits=NUM_BITS,
+                    num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD, biprecision=BIPRECISION),
+            RangeBN(out_channels, num_bits=NUM_BITS,
+                    num_bits_grad=NUM_BITS_GRAD),
             nn.ReLU()
         )
 
@@ -55,8 +61,10 @@ class MobileNet(nn.Module):
         width = width or 1.
         layers = [
             QConv2d(3, nearby_int(width * 32),
-                      kernel_size=3, stride=2, padding=1, bias=False),
-            RangeBN(nearby_int(width * 32)),
+                    kernel_size=3, stride=2, padding=1, bias=False, num_bits=NUM_BITS,
+                    num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD, biprecision=BIPRECISION),
+            RangeBN(nearby_int(width * 32), num_bits=NUM_BITS,
+                    num_bits_grad=NUM_BITS_GRAD),
             nn.ReLU(inplace=True),
 
             DepthwiseSeparableFusedConv2d(
@@ -109,7 +117,8 @@ class MobileNet(nn.Module):
         ]
         self.features = nn.Sequential(*layers)
         self.avg_pool = nn.AvgPool2d(7)
-        self.fc = QLinear(nearby_int(width * 1024), num_classes)
+        self.fc = QLinear(nearby_int(width * 1024), num_classes, num_bits=NUM_BITS,
+                          num_bits_weight=NUM_BITS_WEIGHT, num_bits_grad=NUM_BITS_GRAD, biprecision=BIPRECISION)
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         self.input_transform = {
@@ -132,7 +141,6 @@ class MobileNet(nn.Module):
             {'epoch': 60, 'lr': 1e-3},
             {'epoch': 80, 'lr': 1e-4}
         ]
-
 
     @staticmethod
     def regularization(model, weight_decay=4e-5):
