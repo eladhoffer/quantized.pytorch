@@ -1,4 +1,5 @@
 # Quantized Convolutional networks using PyTorch
+**See https://github.com/eladhoffer/convNet.pytorch for updated version of this code**
 
 Code to replicate results in [Scalable Methods for 8-bit Training of Neural Networks](https://arxiv.org/abs/1805.11046)
 
